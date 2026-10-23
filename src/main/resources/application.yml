@@ -1,0 +1,17 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: multi-agent-customer-support
+
+support:
+  llm:
+    # Set ANTHROPIC_API_KEY to let the agents use Claude. Without it, every agent
+    # runs on deterministic rules so the system still works offline.
+    api-key: ${ANTHROPIC_API_KEY:}
+    model: ${ANTHROPIC_MODEL:claude-sonnet-5-5}
+    max-tokens: 1024
+  escalation:
+    # Refund requests above this amount are always handed to a human.
+    refund-limit: 500
