@@ -5,6 +5,7 @@ import com.customersupport.graph.SupportState;
 import java.util.List;
 
 public record ChatResponse(
+        String conversationId,
         String customerId,
         String category,
         String routingReason,
@@ -15,8 +16,9 @@ public record ChatResponse(
         String ticketId,
         List<String> trace) {
 
-    public static ChatResponse from(SupportState state) {
+    public static ChatResponse from(String conversationId, SupportState state) {
         return new ChatResponse(
+                conversationId,
                 state.customerId(),
                 state.category().name(),
                 state.routingReason().orElse(null),

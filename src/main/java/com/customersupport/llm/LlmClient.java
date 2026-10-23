@@ -1,14 +1,24 @@
 package com.customersupport.llm;
 
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.agent.tool.ToolSpecifications;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.anthropic.AnthropicChatModel;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.service.tool.DefaultToolExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -22,6 +32,9 @@ import java.util.Optional;
 public class LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(LlmClient.class);
+
+    /** Upper bound on model round trips in one tool-calling run, so a confused model cannot loop forever. */
+    static final int MAX_STEPS = 6;
 
     private final ChatModel model;
 
@@ -60,6 +73,44 @@ public class LlmClient {
             return Optional.ofNullable(text).map(String::trim).filter(t -> !t.isEmpty());
         } catch (RuntimeException e) {
             log.warn("LLM call failed, falling back to rules: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Runs a small agent loop: the model sees the {@code @Tool} methods of {@code tools}, may call
+     * any of them, gets the results back, and repeats until it gives a final answer.
+     */
+    public Optional<AgentRun> runWithTools(String systemPrompt, String userPrompt, Object tools) {
+        if (model == null) {
+            return Optional.empty();
+        }
+        List<ToolSpecification> specifications = ToolSpecifications.toolSpecificationsFrom(tools);
+        List<ChatMessage> messages = new ArrayList<>(List.of(SystemMessage.from(systemPrompt), UserMessage.from(userPrompt)));
+        List<String> toolCalls = new ArrayList<>();
+        try {
+            for (int step = 0; step < MAX_STEPS; step++) {
+                AiMessage reply = model.chat(ChatRequest.builder()
+                                .messages(messages)
+                                .toolSpecifications(specifications)
+                                .build())
+                        .aiMessage();
+                messages.add(reply);
+
+                if (!reply.hasToolExecutionRequests()) {
+                    String text = reply.text() == null ? "" : reply.text().trim();
+                    return Optional.of(new AgentRun(text, toolCalls));
+                }
+                for (ToolExecutionRequest request : reply.toolExecutionRequests()) {
+                    String result = new DefaultToolExecutor(tools, request).execute(request, null);
+                    toolCalls.add(request.name() + "(" + request.arguments() + ")");
+                    messages.add(ToolExecutionResultMessage.from(request, result));
+                }
+            }
+            log.warn("Agent did not finish within {} steps", MAX_STEPS);
+            return Optional.of(new AgentRun("", toolCalls));
+        } catch (RuntimeException e) {
+            log.warn("LLM tool run failed, falling back to rules: {}", e.getMessage());
             return Optional.empty();
         }
     }

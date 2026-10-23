@@ -39,6 +39,7 @@ public class RouterAgent implements NodeAction<SupportState> {
             TECHNICAL - product problems, errors, login or password issues, installation, performance, API
             GENERAL - anything else: company info, opening hours, accounts, feedback, how-to questions
             ESCALATE - the customer asks for a human, threatens legal action, or is very upset
+            Use the earlier conversation to understand short follow-ups such as "yes, please do that".
             Answer in the form CATEGORY | short reason. Do not add anything else.""";
 
     private final LlmClient llm;
@@ -54,40 +55,44 @@ public class RouterAgent implements NodeAction<SupportState> {
 
         Optional<String> trigger = ESCALATION_TRIGGERS.stream().filter(lower::contains).findFirst();
         if (trigger.isPresent()) {
-            return route(Category.ESCALATE, "Escalation trigger detected: \"" + trigger.get().trim() + "\"");
+            return route(state, Category.ESCALATE, "Escalation trigger detected: \"" + trigger.get().trim() + "\"");
         }
 
-        return llm.complete(SYSTEM_PROMPT, message)
-                .flatMap(RouterAgent::parse)
-                .orElseGet(() -> classifyByKeywords(lower));
+        return llm.complete(SYSTEM_PROMPT, state.promptWithHistory())
+                .flatMap(answer -> parse(state, answer))
+                .orElseGet(() -> classifyByKeywords(state, lower));
     }
 
-    private static Optional<Map<String, Object>> parse(String answer) {
+    private static Optional<Map<String, Object>> parse(SupportState state, String answer) {
         String[] parts = answer.split("\\|", 2);
         try {
             Category category = Category.valueOf(parts[0].trim().toUpperCase(Locale.ROOT));
             String reason = parts.length > 1 ? parts[1].trim() : "Classified by LLM";
-            return Optional.of(route(category, "LLM: " + reason));
+            return Optional.of(route(state, category, "LLM: " + reason));
         } catch (IllegalArgumentException e) {
             return Optional.empty();
         }
     }
 
-    private static Map<String, Object> classifyByKeywords(String lower) {
+    private static Map<String, Object> classifyByKeywords(SupportState state, String lower) {
         long billing = BILLING_WORDS.stream().filter(lower::contains).count();
         long technical = TECHNICAL_WORDS.stream().filter(lower::contains).count();
         if (billing == 0 && technical == 0) {
-            return route(Category.GENERAL, "No billing or technical keywords");
+            // A follow-up like "yes please" stays with the agent that handled the previous turn.
+            Optional<String> previous = state.value(SupportState.CATEGORY);
+            if (state.history().size() > 1 && previous.isPresent() && !Category.ESCALATE.name().equals(previous.get())) {
+                return route(state, Category.valueOf(previous.get()), "Follow-up to the previous " + previous.get() + " turn");
+            }
+            return route(state, Category.GENERAL, "No billing or technical keywords");
         }
-        return billing >= technical
-                ? route(Category.BILLING, "Keyword match (billing=" + billing + ", technical=" + technical + ")")
-                : route(Category.TECHNICAL, "Keyword match (billing=" + billing + ", technical=" + technical + ")");
+        String counts = "Keyword match (billing=" + billing + ", technical=" + technical + ")";
+        return route(state, billing >= technical ? Category.BILLING : Category.TECHNICAL, counts);
     }
 
-    private static Map<String, Object> route(Category category, String reason) {
+    private static Map<String, Object> route(SupportState state, Category category, String reason) {
         return Map.of(
                 SupportState.CATEGORY, category.name(),
                 SupportState.ROUTING_REASON, reason,
-                SupportState.TRACE, List.of("router: " + category + " (" + reason + ")"));
+                SupportState.TRACE, state.traceWith("router: " + category + " (" + reason + ")"));
     }
 }

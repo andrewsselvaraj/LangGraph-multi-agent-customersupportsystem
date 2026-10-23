@@ -29,7 +29,29 @@ class SupportControllerTest {
                 .andExpect(jsonPath("$.category").value("BILLING"))
                 .andExpect(jsonPath("$.handledBy").value("billing"))
                 .andExpect(jsonPath("$.escalated").value(false))
+                .andExpect(jsonPath("$.conversationId").exists())
                 .andExpect(jsonPath("$.trace.length()").value(2));
+    }
+
+    @Test
+    void conversationContinuesWithSameId() throws Exception {
+        mvc.perform(post("/api/support/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"conversationId": "conv-1", "customerId": "C-1001", "message": "What plan am I on?"}"""))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/support/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"conversationId": "conv-1", "message": "thanks, and the price?"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerId").value("C-1001"));
+
+        mvc.perform(get("/api/support/conversations/conv-1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.history.length()").value(4));
+        mvc.perform(get("/api/support/conversations/unknown"))
+                .andExpect(status().isNotFound());
     }
 
     @Test

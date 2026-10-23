@@ -39,7 +39,8 @@ public class EscalationAgent implements NodeAction<SupportState> {
                 .orElse("Customer requested a human agent");
         Priority priority = priority(state);
 
-        Ticket ticket = tickets.open(state.customerId(), state.message(), state.category().name(), reason, priority);
+        Ticket ticket = tickets.open(state.customerId(), state.message(), state.category().name(), reason, priority,
+                state.history());
 
         String eta = switch (priority) {
             case URGENT -> "within 1 hour";
@@ -56,7 +57,8 @@ public class EscalationAgent implements NodeAction<SupportState> {
                 SupportState.ESCALATION_REASON, reason,
                 SupportState.TICKET_ID, ticket.id(),
                 SupportState.RESPONSE, response,
-                SupportState.TRACE, List.of(NAME + ": opened " + ticket.id() + " (" + priority + ")"));
+                SupportState.TRACE, state.traceWith(NAME + ": opened " + ticket.id() + " (" + priority + ")"),
+                SupportState.HISTORY, List.of("Agent (" + NAME + "): " + response));
     }
 
     private Priority priority(SupportState state) {

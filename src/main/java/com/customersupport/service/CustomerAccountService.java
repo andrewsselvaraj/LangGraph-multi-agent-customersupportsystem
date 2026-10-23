@@ -3,10 +3,13 @@ package com.customersupport.service;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** In-memory stand-in for a billing system. Replace with a real client in production. */
 @Service
@@ -18,6 +21,13 @@ public class CustomerAccountService {
     public record Account(String customerId, String name, String plan, BigDecimal monthlyPrice,
                           LocalDate nextBillingDate, List<Invoice> invoices) {
     }
+
+    public record Refund(String id, String customerId, String invoiceId, BigDecimal amount, String reason,
+                         Instant createdAt) {
+    }
+
+    private final Map<String, Refund> refundsByInvoice = new ConcurrentHashMap<>();
+    private final AtomicInteger refundSequence = new AtomicInteger(5000);
 
     private final Map<String, Account> accounts = Map.of(
             "C-1001", new Account("C-1001", "Alice Johnson", "Pro", new BigDecimal("49.00"),
@@ -35,5 +45,16 @@ public class CustomerAccountService {
 
     public Optional<Account> find(String customerId) {
         return Optional.ofNullable(accounts.get(customerId));
+    }
+
+    /** Records a refund; returns empty if the invoice was already refunded. */
+    public Optional<Refund> issueRefund(String customerId, String invoiceId, BigDecimal amount, String reason) {
+        Refund refund = new Refund("RF-" + refundSequence.incrementAndGet(), customerId, invoiceId, amount, reason,
+                Instant.now());
+        return refundsByInvoice.putIfAbsent(invoiceId, refund) == null ? Optional.of(refund) : Optional.empty();
+    }
+
+    public Optional<Refund> refundFor(String invoiceId) {
+        return Optional.ofNullable(refundsByInvoice.get(invoiceId));
     }
 }

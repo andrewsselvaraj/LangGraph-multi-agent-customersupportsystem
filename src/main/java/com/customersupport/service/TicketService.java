@@ -17,15 +17,17 @@ public class TicketService {
     public enum Priority { LOW, NORMAL, HIGH, URGENT }
 
     public record Ticket(String id, String customerId, String message, String category,
-                         String reason, Priority priority, Instant createdAt) {
+                         String reason, Priority priority, List<String> conversation, Instant createdAt) {
     }
 
     private final Map<String, Ticket> tickets = new ConcurrentHashMap<>();
     private final AtomicInteger sequence = new AtomicInteger(1000);
 
-    public Ticket open(String customerId, String message, String category, String reason, Priority priority) {
+    public Ticket open(String customerId, String message, String category, String reason, Priority priority,
+                       List<String> conversation) {
         String id = "TCK-" + sequence.incrementAndGet();
-        Ticket ticket = new Ticket(id, customerId, message, category, reason, priority, Instant.now());
+        Ticket ticket = new Ticket(id, customerId, message, category, reason, priority, List.copyOf(conversation),
+                Instant.now());
         tickets.put(id, ticket);
         return ticket;
     }
